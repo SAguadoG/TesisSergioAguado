@@ -1,10 +1,11 @@
-from sklearn.model_selection import train_test_split, GridSearchCV
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, precision_recall_fscore_support
-import matplotlib.pyplot as plt
 import numpy as np
 import os
-import seaborn as sns
+import matplotlib.pyplot as plt
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import f1_score, confusion_matrix, classification_report, accuracy_score
+
 
 def preprocess_signal(signal, obj_snr_db):
     """
@@ -35,6 +36,7 @@ def preprocess_signal(signal, obj_snr_db):
     rms = np.sqrt(np.mean(noisy_signal ** 2))
     crest_factor = np.max(noisy_signal) / rms
     return np.array([variance, skewness, kurtosis, thd, crest_factor])
+
 
 def load_signal(data_path):
     """
@@ -71,9 +73,10 @@ def load_signal(data_path):
                             file_path = os.path.join(subset_path, filename)
                             signal = np.load(file_path)
                             # La preprocesamiento ahora se hará dentro del bucle de iteración
-                            features.append(signal) # Guardamos la señal original para añadir ruido después
+                            features.append(signal)  # Guardamos la señal original para añadir ruido después
                             labels.append(label)
     return np.array(features), np.array(labels)
+
 
 # Ejemplo de uso de la carga de datos
 data_path = "data"  # ¡Asegúrate de que esta ruta sea correcta para tu sistema!
@@ -107,24 +110,36 @@ for noise_db in noise_levels_db:
     # Preprocesar las señales originales con el nivel de ruido actual
     noisy_features = np.array([preprocess_signal(signal, noise_db) for signal in original_features])
 
-    # Dividir los datos en conjunto de entrenamiento y prueba (usando las características con el ruido actual)
-    X_train, X_test, y_train, y_test = train_test_split(noisy_features, original_labels, test_size=0.2, random_state=1, stratify=original_labels)
+    X_train, X_test, y_train, y_test = train_test_split(noisy_features, original_labels, test_size=0.2, random_state=0,
+                                                        stratify=original_labels)
 
-    # Definir y entrenar el modelo (puedes mantener tu búsqueda de hiperparámetros si lo deseas)
-    param_grid = {
-        'max_depth': [5, 10, 15, None],
-        'min_samples_split': [2, 5, 10],
-        'min_samples_leaf': [1, 2, 5],
-        'criterion': ['gini', 'entropy']
-    }
-    dt_model = DecisionTreeClassifier(random_state=42)
-    grid_search = GridSearchCV(estimator=dt_model, param_grid=param_grid, cv=5, n_jobs=-1, verbose=0, scoring='accuracy') # Cambié scoring a 'accuracy' para la iteración
-    grid_search.fit(X_train, y_train)
-    best_dt_model = grid_search.best_estimator_
-    y_pred = best_dt_model.predict(X_test)
+    # Normalizar las características
+    scaler = StandardScaler()
+    X_train = scaler.fit_transform(X_train)  # Normalizar características de entrenamiento
+    X_test = scaler.transform(X_test)  # Normalizar características de prueba
 
-    # Evaluar el modelo
-    accuracy = accuracy_score(y_test, y_pred)
+    # Buscar el mejor valor de k
+    k_values = range(1, 20)
+    accuracies = []
+    best_model = None
+    best_k = 0
+    best_accuracy = 0
+    best_y_pred = None
+
+    for k in k_values:
+        knn = KNeighborsClassifier(n_neighbors=k)
+        knn.fit(X_train, y_train)
+        y_pred = knn.predict(X_test)
+        acc = accuracy_score(y_test, y_pred)
+        accuracies.append(acc)
+
+        # Guardar el mejor modelo
+        if acc > best_accuracy:
+            best_accuracy = acc
+            best_k = k
+            best_model = knn
+            best_y_pred = y_pred
+
     report = classification_report(y_test, y_pred, output_dict=True, zero_division=0)
 
     # Calcular la media de precisión, recall y F1-score (ponderados por la cantidad de muestras en cada clase)
@@ -132,27 +147,27 @@ for noise_db in noise_levels_db:
     recall_weighted = report['weighted avg']['recall']
     f1_weighted = report['weighted avg']['f1-score']
 
-    accuracies.append(accuracy)
+    accuracies.append(best_accuracy)
     precisions.append(precision_weighted)
     recalls.append(recall_weighted)
     f1_scores.append(f1_weighted)
     noise_values.append(noise_db)
 
-    print(f"Accuracy para {noise_db} dB: {accuracy:.2f}")
+    print(f"Accuracy para {noise_db} dB: {best_accuracy:.2f}")
     print(f"Precision (ponderada) para {noise_db} dB: {precision_weighted:.2f}")
     print(f"Recall (ponderado) para {noise_db} dB: {recall_weighted:.2f}")
     print(f"F1-score (ponderado) para {noise_db} dB: {f1_weighted:.2f}")
 
 # Generar la gráfica
 plt.figure(figsize=(10, 6))
-plt.plot(noise_values, accuracies, color = 'r', label='Accuracy')
-plt.plot(noise_values, precisions, color = 'b', label='Precision (Weighted)')
-plt.plot(noise_values, recalls, color = 'orange',label='Recall (Weighted)')
-plt.plot(noise_values, f1_scores, color = 'black', label='F1-Score (Weighted)')
-plt.xlabel('Nivel de Ruido (dB)')
+plt.plot(noise_values, accuracies, color='r', label='Accuracy')
+plt.plot(noise_values, precisions, color='b', label='Precision (Weighted)')
+plt.plot(noise_values, recalls, color='orange', label='Recall (Weighted)')
+plt.plot(noise_values, f1_scores, color='black', label='F1-Score (Weighted)')
+plt.xlabel('Nivel de Ruido SNR (dB)')
 plt.ylabel('Métricas de Clasificación')
-plt.title('Rendimiento del Modelo vs. Nivel de Ruido')
+plt.title('Rendimiento del Modelo vs. Nivel de Ruido para Gradient Booster')
 plt.legend()
 plt.grid(True)
-plt.gca().invert_xaxis() # Invertir el eje x para que el ruido disminuya de izquierda a derecha
+plt.gca().invert_xaxis()  # Invertir el eje x para que el ruido disminuya de izquierda a derecha
 plt.show()

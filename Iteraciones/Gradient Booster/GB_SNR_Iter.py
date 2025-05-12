@@ -1,10 +1,10 @@
-from sklearn.model_selection import train_test_split, GridSearchCV
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix, precision_recall_fscore_support
-import matplotlib.pyplot as plt
 import numpy as np
 import os
-import seaborn as sns
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+import matplotlib.pyplot as plt
+
 
 def preprocess_signal(signal, obj_snr_db):
     """
@@ -35,6 +35,7 @@ def preprocess_signal(signal, obj_snr_db):
     rms = np.sqrt(np.mean(noisy_signal ** 2))
     crest_factor = np.max(noisy_signal) / rms
     return np.array([variance, skewness, kurtosis, thd, crest_factor])
+
 
 def load_signal(data_path):
     """
@@ -71,12 +72,13 @@ def load_signal(data_path):
                             file_path = os.path.join(subset_path, filename)
                             signal = np.load(file_path)
                             # La preprocesamiento ahora se hará dentro del bucle de iteración
-                            features.append(signal) # Guardamos la señal original para añadir ruido después
+                            features.append(signal)  # Guardamos la señal original para añadir ruido después
                             labels.append(label)
     return np.array(features), np.array(labels)
 
+
 # Ejemplo de uso de la carga de datos
-data_path = "data"  # ¡Asegúrate de que esta ruta sea correcta para tu sistema!
+data_path = "data"  # ¡Asegúrate de que esta ruta sea correcta para tu sistema, quien sea que use esto!
 original_features, original_labels = load_signal(data_path)
 
 print(f"Forma de las características originales cargadas: {original_features.shape}")
@@ -107,17 +109,25 @@ for noise_db in noise_levels_db:
     # Preprocesar las señales originales con el nivel de ruido actual
     noisy_features = np.array([preprocess_signal(signal, noise_db) for signal in original_features])
 
-    # Dividir los datos en conjunto de entrenamiento y prueba
-    X_train, X_test, y_train, y_test = train_test_split(noisy_features, original_labels, test_size=0.2, random_state=1, stratify=original_labels)
+    X_train, X_test, y_train, y_test = train_test_split(noisy_features, original_labels, test_size=0.2, random_state=42,
+                                                        stratify=original_labels)
+    # Crear el modelo de Gradient Boosting
+    GradBoost = HistGradientBoostingClassifier(
+        max_iter=100,  # Número de iteraciones (boosting rounds)
+        loss='log_loss',  # Pérdida para clasificación (log_loss para multiclase)
+        random_state=123
+    )
 
-    # Crear el modelo base
-    rf_model = RandomForestClassifier()
-    rf_model.fit(X_train, y_train)
+    # Entrenar el modelo
+    GradBoost.fit(X_train, y_train)
 
-    y_pred = rf_model.predict(X_test)
+    # Realizar predicciones
+    predicciones = GradBoost.predict(X_test)
 
-    # Evaluar el modelo
-    accuracy = accuracy_score(y_test, y_pred)
+    # Calcular métricas
+    accuracy = accuracy_score(y_test, predicciones)
+    y_pred = GradBoost.predict(X_test)
+
     report = classification_report(y_test, y_pred, output_dict=True, zero_division=0)
 
     # Calcular la media de precisión, recall y F1-score (ponderados por la cantidad de muestras en cada clase)
@@ -138,14 +148,14 @@ for noise_db in noise_levels_db:
 
 # Generar la gráfica
 plt.figure(figsize=(10, 6))
-plt.plot(noise_values, accuracies, color = 'r', label='Accuracy')
-plt.plot(noise_values, precisions, color = 'b', label='Precision (Weighted)')
-plt.plot(noise_values, recalls, color = 'orange',label='Recall (Weighted)')
-plt.plot(noise_values, f1_scores, color = 'black', label='F1-Score (Weighted)')
+plt.plot(noise_values, accuracies, color='r', label='Accuracy')
+plt.plot(noise_values, precisions, color='b', label='Precision (Weighted)')
+plt.plot(noise_values, recalls, color='orange', label='Recall (Weighted)')
+plt.plot(noise_values, f1_scores, color='black', label='F1-Score (Weighted)')
 plt.xlabel('Nivel de Ruido SNR (dB)')
 plt.ylabel('Métricas de Clasificación')
-plt.title('Rendimiento del Modelo vs. Nivel de Ruido para Random Forest')
+plt.title('Rendimiento del Modelo vs. Nivel de Ruido para Gradient Booster')
 plt.legend()
 plt.grid(True)
-plt.gca().invert_xaxis() # Invertir el eje x para que el ruido disminuya de izquierda a derecha
+plt.gca().invert_xaxis()  # Invertir el eje x para que el ruido disminuya de izquierda a derecha
 plt.show()
