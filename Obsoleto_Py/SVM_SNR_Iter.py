@@ -105,7 +105,7 @@ def preprocess_signal(signal, fs):
 
     # Derivative features (for transients)
     derivative = np.diff(signal)
-    derivative = np.concatenate(([0], derivative))  # Pad the derivative to have the same length as signal
+    derivative = np.concatenate(([0], derivative))
     max_derivative = np.max(np.abs(derivative))
     mean_abs_derivative = np.mean(np.abs(derivative))
     derivative_features = np.array([max_derivative, mean_abs_derivative])

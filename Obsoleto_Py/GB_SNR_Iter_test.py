@@ -1,27 +1,16 @@
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
-from sklearn.model_selection import train_test_split
 import numpy as np
 import os
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 import matplotlib.pyplot as plt
 from scipy.signal import hilbert
 import pywt
 from scipy.fft import fft
 from sklearn.preprocessing import StandardScaler, RobustScaler
-import time  # Importa el módulo time
 
 def preprocess_signal_SNR(signal, obj_snr_db, fs):
-    """
-    Preprocesa la señal añadiendo ruido gaussiano con un nivel SNR específico y extrayendo características.
 
-    Args:
-        signal (np.ndarray): La señal de entrada.
-        obj_snr_db (int): El nivel de relación señal-ruido (SNR) en dB.
-        fs (int): Frecuencia de muestreo
-
-    Returns:
-        np.ndarray: Un vector con las características extraídas de la señal con ruido.
-    """
     x_watts = signal ** 2
     sig_avg_watts = np.mean(x_watts)
     sig_avg_db = 10 * np.log10(sig_avg_watts)
@@ -180,7 +169,6 @@ precisions = []
 recalls = []
 f1_scores = []
 noise_values = []
-times = [] # Para almacenar los tiempos de cada iteración
 
 for noise_db in noise_levels_db:
     print(f"\n--- Procesando con nivel de ruido: {noise_db} dB ---")
@@ -205,27 +193,27 @@ for noise_db in noise_levels_db:
     # Normalizar las características por separado
     X_train_time_domain = scaler_time_domain.fit_transform(X_train[:, :5])
     X_test_time_domain = scaler_time_domain.transform(X_test[:, :5])
-    X_train_SNR_time_domain = scaler_time_domain.fit_transform(X_train_SNR[:, :5]) # Fit antes de transformar
+    X_train_SNR_time_domain = scaler_time_domain.transform(X_train_SNR[:, :5])
     X_test_SNR_time_domain = scaler_time_domain.transform(X_test_SNR[:, :5])
 
     X_train_wavelet = scaler_wavelet.fit_transform(X_train[:, 5:15])
     X_test_wavelet = scaler_wavelet.transform(X_test[:, 5:15])
-    X_train_SNR_wavelet = scaler_wavelet.fit_transform(X_train_SNR[:, 5:15]) # Fit antes de transformar
+    X_train_SNR_wavelet = scaler_wavelet.transform(X_train_SNR[:, 5:15])
     X_test_SNR_wavelet = scaler_wavelet.transform(X_test[:, 5:15])
 
     X_train_frequency = scaler_frequency.fit_transform(X_train[:, 15:35])
     X_test_frequency = scaler_frequency.transform(X_test[:, 15:35])
-    X_train_SNR_frequency = scaler_frequency.fit_transform(X_train_SNR[:, 15:35]) # Fit antes de transformar
+    X_train_SNR_frequency = scaler_frequency.transform(X_train_SNR[:, 15:35])
     X_test_SNR_frequency = scaler_frequency.transform(X_test[:, 15:35])
 
     X_train_envelope = scaler_envelope.fit_transform(X_train[:, 35:38])
     X_test_envelope = scaler_envelope.transform(X_test[:, 35:38])
-    X_train_SNR_envelope = scaler_envelope.fit_transform(X_train_SNR[:, 35:38]) # Fit antes de transformar
+    X_train_SNR_envelope = scaler_envelope.transform(X_train_SNR[:, 35:38])
     X_test_SNR_envelope = scaler_envelope.transform(X_test[:, 35:38])
 
     X_train_derivative = scaler_derivative.fit_transform(X_train[:, 38:])
     X_test_derivative = scaler_derivative.transform(X_test[:, 38:])
-    X_train_SNR_derivative = scaler_derivative.fit_transform(X_train_SNR[:, 38:]) # Fit antes de transformar
+    X_train_SNR_derivative = scaler_derivative.transform(X_train_SNR[:, 38:])
     X_test_SNR_derivative = scaler_derivative.transform(X_test[:, 38:])
 
     # Concatenar las características normalizadas
@@ -239,43 +227,50 @@ for noise_db in noise_levels_db:
     ], axis=1)
     X_train_SNR_normalized = np.concatenate([
         X_train_SNR_time_domain, X_train_SNR_wavelet, X_train_SNR_frequency,
-        X_train_SNR_envelope, X_train_SNR_derivative
+        X_train_SNR_envelope, X_train_derivative
     ], axis=1)
     X_test_SNR_normalized = np.concatenate([
         X_test_SNR_time_domain, X_test_SNR_wavelet, X_test_SNR_frequency,
         X_test_envelope, X_test_derivative
     ], axis=1)
 
-# -------
-    start_time = time.time() # Tiempo de inicio de la iteración
+    # Crear el modelo de Gradient Boosting
+    GradBoost = HistGradientBoostingClassifier(
+        max_iter=100,
+        loss='log_loss',
+        random_state=123,
+        l2_regularization=0.1  # Añadimos regularización L2
+    )
 
-    # Crear el modelo base
-    rf_model = RandomForestClassifier()
-    rf_model.fit(X_train_normalized, y_train)
+    # Entrenar el modelo
+    GradBoost.fit(X_train_normalized, y_train)
 
-    y_pred = rf_model.predict(X_test_SNR_normalized)
+    # Realizar predicciones
+    predicciones = GradBoost.predict(X_test_SNR_normalized)
 
     # Calcular métricas
-    accuracy = accuracy_score(y_test_SNR, y_pred)
+    accuracy = accuracy_score(y_test_SNR, predicciones)
+    y_pred = GradBoost.predict(X_test_SNR_normalized)
+
     report = classification_report(y_test, y_pred, output_dict=True, zero_division=0)
+
     precision_weighted = report['weighted avg']['precision']
     recall_weighted = report['weighted avg']['recall']
     f1_weighted = report['weighted avg']['f1-score']
+
     accuracies.append(accuracy)
     precisions.append(precision_weighted)
     recalls.append(recall_weighted)
     f1_scores.append(f1_weighted)
     noise_values.append(noise_db)
-    end_time = time.time()
-    iteration_time = end_time - start_time
-    times.append(iteration_time)
 
     print(f"Accuracy para {noise_db} dB: {accuracy:.2f}")
     print(f"Precision (ponderada) para {noise_db} dB: {precision_weighted:.2f}")
     print(f"Recall (ponderado) para {noise_db} dB: {recall_weighted:.2f}")
     print(f"F1-score (ponderado) para {noise_db} dB: {f1_weighted:.2f}")
-    print(f"Tiempo de computación para {noise_db} dB: {iteration_time:.2f} segundos")
-    cm = confusion_matrix(y_test_SNR, y_pred)
+
+    # Calcular y mostrar la matriz de confusión
+    cm = confusion_matrix(y_test_SNR, predicciones)
     print("Matriz de Confusión:")
     print(cm)
 
@@ -287,11 +282,8 @@ plt.plot(noise_values, recalls, color='orange', label='Recall (Weighted)')
 plt.plot(noise_values, f1_scores, color='black', label='F1-Score (Weighted)')
 plt.xlabel('Nivel de Ruido SNR (dB)')
 plt.ylabel('Métricas de Clasificación')
-plt.title('Rendimiento del Modelo vs. Nivel de Ruido para Decision Tree')
+plt.title('Rendimiento del Modelo vs. Nivel de Ruido para Gradient Booster')
 plt.legend()
 plt.grid(True)
 plt.gca().invert_xaxis()
 plt.show()
-
-total_time = sum(times)
-print(f"Tiempo total de computación: {total_time:.2f} segundos")
